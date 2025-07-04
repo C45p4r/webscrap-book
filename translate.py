@@ -15,8 +15,28 @@ def setup_opencc():
     """Setup OpenCC converter for Simplified to Traditional Chinese"""
     try:
         # s2t = Simplified to Traditional
-        converter = opencc.OpenCC('s2t')
-        return converter
+        # Try different conversion configs to ensure proper translation
+        conversion_configs = ['s2t', 's2tw', 's2hk']  # Standard, Taiwan, Hong Kong variants
+        
+        for config in conversion_configs:
+            try:
+                converter = opencc.OpenCC(config)
+                # Test the converter
+                test_text = "简体中文测试"
+                converted = converter.convert(test_text)
+                print(f"✓ OpenCC config '{config}' working: {test_text} -> {converted}")
+                
+                # Use the first working config
+                if converted != test_text:
+                    print(f"✓ Using OpenCC config: {config}")
+                    return converter
+            except Exception as e:
+                print(f"⚠️  Config '{config}' failed: {e}")
+                continue
+        
+        print("❌ No working OpenCC configuration found")
+        return None
+        
     except Exception as e:
         print(f"❌ Error setting up OpenCC: {e}")
         print("📋 Please install OpenCC with: pip install opencc-python-reimplemented")
@@ -90,8 +110,22 @@ def translate_chapter(chapter_info: Tuple[str, str, str, opencc.OpenCC]) -> Tupl
         with open(input_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Translate content
+        # Debug: Show original content sample
+        print(f"    Original sample: {content[:100]}...")
+        
+        # Translate content using OpenCC
         translated_content = converter.convert(content)
+        
+        # Debug: Show translated content sample
+        print(f"    Translated sample: {translated_content[:100]}...")
+        
+        # Verify translation actually happened
+        if content == translated_content:
+            print(f"    ⚠️  Warning: No translation occurred for {filename}")
+            # Force translation by testing with known simplified characters
+            test_simplified = "简体中文测试"
+            test_traditional = converter.convert(test_simplified)
+            print(f"    Test translation: {test_simplified} -> {test_traditional}")
         
         # Format for iPhone screen
         formatted_content = format_for_iphone(translated_content)
@@ -167,6 +201,7 @@ def translate_all_chapters(input_dir: str, output_dir: str, max_workers: int = 5
     success_count = 0
     error_count = 0
     errors = []
+    total_chars_changed = 0
     
     print(f"\n🚀 Starting parallel translation with {max_workers} workers...")
     
@@ -181,6 +216,29 @@ def translate_all_chapters(input_dir: str, output_dir: str, max_workers: int = 5
                 result_filename, success, error_msg = future.result()
                 if success:
                     success_count += 1
+                    # Read the translated file to count changes
+                    try:
+                        original_path = os.path.join(input_dir, result_filename)
+                        translated_path = os.path.join(output_dir, result_filename)
+                        
+                        with open(original_path, 'r', encoding='utf-8') as f:
+                            original = f.read()
+                        with open(translated_path, 'r', encoding='utf-8') as f:
+                            translated = f.read()
+                        
+                        # Count actual character changes (ignoring formatting changes)
+                        orig_content = original.replace('\n', '').replace(' ', '')
+                        trans_content = translated.replace('\n', '').replace(' ', '')
+                        
+                        changes = sum(1 for a, b in zip(orig_content, trans_content) if a != b)
+                        total_chars_changed += changes
+                        
+                        if changes > 0:
+                            print(f"  ✅ {result_filename}: {changes} characters translated")
+                        else:
+                            print(f"  ⚠️  {result_filename}: No characters changed (may already be Traditional)")
+                    except:
+                        pass
                 else:
                     error_count += 1
                     errors.append(error_msg)
@@ -200,8 +258,14 @@ def translate_all_chapters(input_dir: str, output_dir: str, max_workers: int = 5
     print(f"✓ Successfully translated: {success_count} chapters")
     print(f"❌ Failed translations: {error_count} chapters")
     print(f"⏱️  Total time: {total_time:.2f} seconds")
-    print(f"📱 All files formatted for iPhone screen")
+    print(f"� Total characters changed: {total_chars_changed}")
+    print(f"�📱 All files formatted for iPhone screen")
     print(f"📁 Output saved to: {output_dir}")
+    
+    if total_chars_changed > 0:
+        print(f"✅ Translation successful - {total_chars_changed} characters converted!")
+    else:
+        print(f"⚠️  No characters were changed - content may already be Traditional Chinese")
     
     if errors:
         print(f"\n❌ Errors encountered:")
